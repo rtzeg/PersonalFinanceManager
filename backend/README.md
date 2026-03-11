@@ -32,3 +32,17 @@ REST backend for the existing frontend.
 - Budgets + income items + category limits + computed summary
 - Notifications list/read/read-all
 - Analytics overview/categories/income-vs-expense/balance-trend/budget-vs-actual
+
+
+## Docker
+
+Из корня проекта:
+
+```sh
+docker compose up --build
+```
+
+Backend поднимется на `http://localhost:8080`, БД будет подключена автоматически через:
+- `DB_URL=jdbc:postgresql://db:5432/pfm`
+- `DB_USERNAME=postgres`
+- `DB_PASSWORD=postgres`
