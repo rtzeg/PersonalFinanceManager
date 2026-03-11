@@ -1,303 +1,340 @@
-import { 
-  Account, 
-  Transaction, 
-  Debt, 
-  Notification, 
+import {
+  Account,
+  Debt,
+  ExchangeRate,
   FamilyMember,
-  ExchangeRate
-} from '../context/AppContext';
-import { 
-  mockAccounts, 
-  mockTransactions, 
-  mockDebts, 
-  mockNotifications, 
-  mockFamilyMembers, 
-  mockExchangeRates 
-} from './mockData';
+  Notification,
+  Transaction,
+  categoryIcons,
+} from "../context/AppContext";
 
-// Имитация задержки для реальности
-const delay = (ms: number = 1000) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Тип для настроек API
 export interface ApiConfig {
   baseUrl: string;
-  useMockData: boolean;
-  mockDelay: number;
 }
 
-// По умолчанию используем фейковые данные
 let apiConfig: ApiConfig = {
-  baseUrl: 'https://api.example.com',
-  useMockData: true,
-  mockDelay: 1000
+  baseUrl: import.meta.env.VITE_API_BASE_URL || "",
 };
 
-// Функция для изменения настроек API
 export const setApiConfig = (config: Partial<ApiConfig>) => {
   apiConfig = { ...apiConfig, ...config };
 };
 
-// Функция для получения настроек API
 export const getApiConfig = () => apiConfig;
 
-// Базовая функция для имитации запросов
-const fetchData = async <T>(getData: () => T, delayMs?: number): Promise<T> => {
-  await delay(delayMs ?? apiConfig.mockDelay);
-  return Promise.resolve(getData());
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+const apiFetch = async <T>(path: string, method: HttpMethod = "GET", body?: unknown): Promise<T> => {
+  const response = await fetch(`${apiConfig.baseUrl}${path}`, {
+    method,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
 };
 
-// Функция для имитации ошибок
-const fetchError = async (message: string, delayMs?: number): Promise<never> => {
-  await delay(delayMs ?? apiConfig.mockDelay);
-  return Promise.reject(new Error(message));
+let authReadyPromise: Promise<void> | null = null;
+
+const ensureSession = async (): Promise<void> => {
+  if (authReadyPromise) return authReadyPromise;
+
+  authReadyPromise = (async () => {
+    try {
+      await apiFetch("/api/auth/me");
+      return;
+    } catch {
+      const username = import.meta.env.VITE_DEMO_USERNAME || "demo";
+      const password = import.meta.env.VITE_DEMO_PASSWORD || "demo123";
+
+      try {
+        await apiFetch("/api/auth/register", "POST", { username, password });
+      } catch {
+        // might already exist
+      }
+
+      await apiFetch("/api/auth/login", "POST", { username, password });
+    }
+  })();
+
+  return authReadyPromise;
 };
 
-// API для счетов
+const parseCardNetwork = (value?: string): Account["cardNetwork"] => {
+  if (!value) return "none";
+  if (value === "visa" || value === "mastercard" || value === "humo" || value === "uzcard") return value;
+  return "none";
+};
+
+const accountToUi = (account: any): Account => ({
+  id: String(account.id),
+  name: account.name,
+  type: account.type,
+  currency: account.currency,
+  balance: Number(account.balance ?? 0),
+  color: account.color || "from-slate-500 to-slate-600",
+  cardNetwork: parseCardNetwork(account.cardNetwork),
+  cardNumberFull: account.cardNumberFull,
+  expiryDate: account.expiryDate,
+  includedInBalance: account.includedInBalance,
+});
+
+const accountToBackend = (account: Partial<Account>) => ({
+  name: account.name,
+  type: account.type,
+  currency: account.currency,
+  balance: account.balance,
+  color: account.color,
+  cardNetwork: account.cardNetwork,
+  cardNumberMasked: undefined,
+  cardNumberFull: account.cardNumberFull,
+  expiryDate: account.expiryDate,
+  includedInBalance: account.includedInBalance,
+});
+
+const transactionToUi = (transaction: any, accountById: Map<string, Account>): Transaction => {
+  const accountId = String(transaction.accountId);
+  const toAccountId = transaction.toAccountId ? String(transaction.toAccountId) : undefined;
+
+  return {
+    id: String(transaction.id),
+    type: transaction.type,
+    amount: Number(transaction.amount ?? 0),
+    currency: transaction.currency,
+    category: transaction.category,
+    description: transaction.description,
+    accountId,
+    accountName: accountById.get(accountId)?.name || "Unknown account",
+    toAccountId,
+    toAccountName: toAccountId ? accountById.get(toAccountId)?.name : undefined,
+    toCurrency: transaction.toCurrency,
+    toAmount: transaction.toAmount != null ? Number(transaction.toAmount) : undefined,
+    date: transaction.occurredAt,
+    icon: categoryIcons[transaction.category] || "circle-dot",
+    note: transaction.note,
+  };
+};
+
+const transactionToBackend = (transaction: Partial<Transaction>) => ({
+  type: transaction.type,
+  amount: transaction.amount,
+  currency: transaction.currency,
+  category: transaction.category,
+  description: transaction.description,
+  note: transaction.note,
+  accountId: Number(transaction.accountId),
+  toAccountId: transaction.toAccountId ? Number(transaction.toAccountId) : null,
+  toCurrency: transaction.toCurrency,
+  toAmount: transaction.toAmount,
+  occurredAt: transaction.date,
+});
+
+const debtToUi = (debt: any): Debt => ({
+  id: String(debt.id),
+  name: debt.name,
+  amount: Number(debt.amount ?? 0),
+  currency: debt.currency,
+  type: debt.type,
+  status: debt.status,
+  date: debt.debtDate,
+  description: debt.description,
+});
+
+const debtToBackend = (debt: Partial<Debt>) => ({
+  name: debt.name,
+  amount: debt.amount,
+  currency: debt.currency,
+  type: debt.type,
+  status: debt.status,
+  debtDate: debt.date,
+  description: debt.description,
+});
+
+const notificationToUi = (notification: any): Notification => ({
+  id: String(notification.id),
+  title: notification.title,
+  message: notification.message,
+  date: notification.createdAt,
+  read: Boolean(notification.read),
+  type: notification.type,
+});
+
+const exchangeRateToUi = (rate: any): ExchangeRate => ({
+  from: rate.fromCurrency,
+  to: rate.toCurrency,
+  rate: Number(rate.rate ?? 0),
+});
+
 export const accountsApi = {
-  // Получить все счета
   async getAllAccounts(): Promise<Account[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockAccounts);
+    await ensureSession();
+    const data = await apiFetch<any[]>("/api/accounts");
+    return data.map(accountToUi);
   },
 
-  // Получить счет по ID
   async getAccountById(id: string): Promise<Account | undefined> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockAccounts.find(account => account.id === id));
+    await ensureSession();
+    const data = await apiFetch<any>(`/api/accounts/${id}`);
+    return accountToUi(data);
   },
 
-  // Создать новый счет
-  async createAccount(account: Omit<Account, 'id'>): Promise<Account> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const newAccount: Account = {
-      ...account,
-      id: Date.now().toString(),
-    };
-    return fetchData(() => newAccount);
+  async createAccount(account: Omit<Account, "id">): Promise<Account> {
+    await ensureSession();
+    const created = await apiFetch<any>("/api/accounts", "POST", accountToBackend(account));
+    return accountToUi(created);
   },
 
-  // Обновить счет
   async updateAccount(id: string, updates: Partial<Account>): Promise<Account> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const updatedAccount: Account = {
-      ...(mockAccounts.find(account => account.id === id) as Account),
-      ...updates
-    };
-    return fetchData(() => updatedAccount);
+    await ensureSession();
+    const updated = await apiFetch<any>(`/api/accounts/${id}`, "PUT", accountToBackend(updates));
+    return accountToUi(updated);
   },
 
-  // Удалить счет
   async deleteAccount(id: string): Promise<void> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => undefined);
-  }
+    await ensureSession();
+    await apiFetch<void>(`/api/accounts/${id}`, "DELETE");
+  },
 };
 
-// API для транзакций
 export const transactionsApi = {
-  // Получить все транзакции
   async getAllTransactions(): Promise<Transaction[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockTransactions);
+    await ensureSession();
+    const [accounts, transactions] = await Promise.all([
+      accountsApi.getAllAccounts(),
+      apiFetch<any[]>("/api/transactions"),
+    ]);
+    const accountMap = new Map(accounts.map((a) => [a.id, a]));
+    return transactions.map((tx) => transactionToUi(tx, accountMap));
   },
 
-  // Получить транзакции по счету
   async getTransactionsByAccount(accountId: string): Promise<Transaction[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockTransactions.filter(transaction => 
-      transaction.accountId === accountId
-    ));
+    const all = await this.getAllTransactions();
+    return all.filter((transaction) => transaction.accountId === accountId);
   },
 
-  // Создать новую транзакцию
-  async createTransaction(transaction: Omit<Transaction, 'id'>): Promise<Transaction> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const newTransaction: Transaction = {
-      ...transaction,
-      id: Date.now().toString()
-    };
-    return fetchData(() => newTransaction);
+  async createTransaction(transaction: Omit<Transaction, "id">): Promise<Transaction> {
+    await ensureSession();
+    const [created, accounts] = await Promise.all([
+      apiFetch<any>("/api/transactions", "POST", transactionToBackend(transaction)),
+      accountsApi.getAllAccounts(),
+    ]);
+    const accountMap = new Map(accounts.map((a) => [a.id, a]));
+    return transactionToUi(created, accountMap);
   },
 
-  // Обновить транзакцию
   async updateTransaction(id: string, updates: Partial<Transaction>): Promise<Transaction> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const updatedTransaction: Transaction = {
-      ...(mockTransactions.find(transaction => transaction.id === id) as Transaction),
-      ...updates
-    };
-    return fetchData(() => updatedTransaction);
+    await ensureSession();
+    const existing = await apiFetch<any>(`/api/transactions/${id}`);
+    const payload = transactionToBackend({
+      ...transactionToUi(existing, new Map()),
+      ...updates,
+    });
+    const [updated, accounts] = await Promise.all([
+      apiFetch<any>(`/api/transactions/${id}`, "PUT", payload),
+      accountsApi.getAllAccounts(),
+    ]);
+    return transactionToUi(updated, new Map(accounts.map((a) => [a.id, a])));
   },
 
-  // Удалить транзакцию
   async deleteTransaction(id: string): Promise<void> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => undefined);
-  }
+    await ensureSession();
+    await apiFetch<void>(`/api/transactions/${id}`, "DELETE");
+  },
 };
 
-// API для долгов
 export const debtsApi = {
-  // Получить все долги
   async getAllDebts(): Promise<Debt[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockDebts);
+    await ensureSession();
+    const debts = await apiFetch<any[]>("/api/debts");
+    return debts.map(debtToUi);
   },
 
-  // Создать новый долг
-  async createDebt(debt: Omit<Debt, 'id'>): Promise<Debt> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const newDebt: Debt = {
-      ...debt,
-      id: Date.now().toString()
-    };
-    return fetchData(() => newDebt);
+  async createDebt(debt: Omit<Debt, "id">): Promise<Debt> {
+    await ensureSession();
+    const created = await apiFetch<any>("/api/debts", "POST", debtToBackend(debt));
+    return debtToUi(created);
   },
 
-  // Обновить долг
   async updateDebt(id: string, updates: Partial<Debt>): Promise<Debt> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const updatedDebt: Debt = {
-      ...(mockDebts.find(debt => debt.id === id) as Debt),
-      ...updates
-    };
-    return fetchData(() => updatedDebt);
+    await ensureSession();
+    const existing = await apiFetch<any>(`/api/debts`);
+    const current = existing.find((d: any) => String(d.id) === id);
+    const updated = await apiFetch<any>(`/api/debts/${id}`, "PUT", debtToBackend({ ...debtToUi(current), ...updates }));
+    return debtToUi(updated);
   },
 
-  // Удалить долг
   async deleteDebt(id: string): Promise<void> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => undefined);
-  }
+    await ensureSession();
+    await apiFetch<void>(`/api/debts/${id}`, "DELETE");
+  },
 };
 
-// API для уведомлений
 export const notificationsApi = {
-  // Получить все уведомления
   async getAllNotifications(): Promise<Notification[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockNotifications);
+    await ensureSession();
+    const notifications = await apiFetch<any[]>("/api/notifications");
+    return notifications.map(notificationToUi);
   },
 
-  // Создать новое уведомление
-  async createNotification(notification: Omit<Notification, 'id'>): Promise<Notification> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const newNotification: Notification = {
+  async createNotification(notification: Omit<Notification, "id">): Promise<Notification> {
+    return {
       ...notification,
-      id: Date.now().toString()
+      id: String(Date.now()),
     };
-    return fetchData(() => newNotification);
   },
 
-  // Удалить уведомление
   async deleteNotification(id: string): Promise<void> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => undefined);
-  }
+    return;
+  },
 };
 
-// API для членов семьи
 export const familyMembersApi = {
-  // Получить всех членов семьи
   async getAllFamilyMembers(): Promise<FamilyMember[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockFamilyMembers);
+    return [];
   },
-
-  // Создать нового члена семьи
-  async createFamilyMember(member: Omit<FamilyMember, 'id'>): Promise<FamilyMember> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const newMember: FamilyMember = {
-      ...member,
-      id: Date.now().toString()
-    };
-    return fetchData(() => newMember);
+  async createFamilyMember(member: Omit<FamilyMember, "id">): Promise<FamilyMember> {
+    return { ...member, id: String(Date.now()) };
   },
-
-  // Обновить члена семьи
   async updateFamilyMember(id: string, updates: Partial<FamilyMember>): Promise<FamilyMember> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const updatedMember: FamilyMember = {
-      ...(mockFamilyMembers.find(member => member.id === id) as FamilyMember),
-      ...updates
+    return {
+      id,
+      name: updates.name || "Member",
+      email: updates.email || "",
+      avatar: updates.avatar || "👤",
+      role: updates.role || "member",
     };
-    return fetchData(() => updatedMember);
   },
-
-  // Удалить члена семьи
-  async deleteFamilyMember(id: string): Promise<void> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => undefined);
-  }
+  async deleteFamilyMember(): Promise<void> {
+    return;
+  },
 };
 
-// API для курсов валют
 export const exchangeRatesApi = {
-  // Получить все курсы валют
   async getExchangeRates(): Promise<ExchangeRate[]> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    return fetchData(() => mockExchangeRates);
+    await ensureSession();
+    const rates = await apiFetch<any[]>("/api/exchange-rates");
+    return rates.map(exchangeRateToUi);
   },
 
-  // Обновить курс валюты
   async updateExchangeRate(from: string, to: string, rate: number): Promise<ExchangeRate> {
-    if (!apiConfig.useMockData) {
-      return fetchError('Real API not implemented', 0);
-    }
-    const updatedRate: ExchangeRate = {
-      from,
-      to,
-      rate
-    };
-    return fetchData(() => updatedRate);
-  }
+    await ensureSession();
+    const updated = await apiFetch<any>(`/api/exchange-rates/${from}/${to}?rate=${rate}`, "PUT");
+    return exchangeRateToUi(updated);
+  },
 };
 
-// Общий API объект для удобного импорта
 export const api = {
   accounts: accountsApi,
   transactions: transactionsApi,
@@ -307,8 +344,8 @@ export const api = {
   exchangeRates: exchangeRatesApi,
   config: {
     set: setApiConfig,
-    get: getApiConfig
-  }
+    get: getApiConfig,
+  },
 };
 
 export default api;

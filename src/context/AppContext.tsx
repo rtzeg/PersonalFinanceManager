@@ -1,14 +1,6 @@
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from "react";
 import { api } from "../api/api";
 import i18n from "../i18n";
-import {
-  mockAccounts,
-  mockTransactions,
-  mockDebts,
-  mockNotifications,
-  mockFamilyMembers,
-  mockExchangeRates,
-} from "../api/mockData";
 
 export type Workspace = "personal" | "family";
 export type CardNetwork = "visa" | "mastercard" | "humo" | "uzcard" | "none";
@@ -426,7 +418,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         setFamilyCredits(defaultFamilyCredits);
         setNotifications(initialNotifications);
         setFamilyMembers(defaultFamilyMembers);
-        setExchangeRates(mockExchangeRates);
+        setExchangeRates([]);
         setIsLoadingExchangeRates(false);
         setIsLoadingData(false);
       }
