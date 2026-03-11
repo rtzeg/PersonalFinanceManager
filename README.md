@@ -71,3 +71,23 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+
+## Docker (frontend + backend + postgres)
+
+Запуск всего проекта в отдельных контейнерах:
+
+```sh
+docker compose up --build
+```
+
+Сервисы:
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8080`
+- PostgreSQL: `localhost:5432` (`postgres/postgres`, db `pfm`)
+
+Остановка:
+
+```sh
+docker compose down
+```
